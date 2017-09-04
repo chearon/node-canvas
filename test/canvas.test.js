@@ -760,7 +760,9 @@ describe('Canvas', function () {
     it('works', function () {
       var canvas = createCanvas(20, 20)
       var ctx = canvas.getContext('2d')
-      ctx.font = "20px Arial"
+
+      registerFont('./examples/pfennigFont/Pfennig.ttf', {family: 'Pfennig'})
+      ctx.font = "20px Pfennig"
 
       ctx.textBaseline = "alphabetic"
       var metrics = ctx.measureText("Alphabet")
