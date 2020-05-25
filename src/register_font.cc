@@ -36,8 +36,16 @@
 #define IS_PREFERRED_ENC(X) \
   X.platform_id == PREFERRED_PLATFORM_ID && X.encoding_id == PREFERRED_ENCODING_ID
 
+#if defined(__APPLE) || defined(_WIN32)
 #define GET_NAME_RANK(X) \
-  (IS_PREFERRED_ENC(X) ? 1 : 0) + (X.name_id == TT_NAME_ID_PREFERRED_FAMILY ? 1 : 0)
+  ((IS_PREFERRED_ENC(X) ? 1 : 0) << 1) | \
+  (X.name_id == TT_NAME_ID_PREFERRED_FAMILY ? 1 : 0)
+#else
+#define GET_NAME_RANK(X) \
+  ((IS_PREFERRED_ENC(X) ? 1 : 0) << 2) | \
+  ((X.name_id == TT_NAME_ID_PS_NAME ? 1 : 0) << 1) | \
+  (X.name_id == TT_NAME_ID_PREFERRED_FAMILY ? 1 : 0)
+#endif
 
 /*
  * Return a UTF-8 encoded string given a TrueType name buf+len
@@ -105,7 +113,13 @@ get_family_name(FT_Face face) {
   for (unsigned i = 0; i < FT_Get_Sfnt_Name_Count(face); ++i) {
     FT_Get_Sfnt_Name(face, i, &name);
 
-    if (name.name_id == TT_NAME_ID_FONT_FAMILY || name.name_id == TT_NAME_ID_PREFERRED_FAMILY) {
+    if (
+      name.name_id == TT_NAME_ID_FONT_FAMILY ||
+#if !defined(__APPLE) && !defined(_WIN32)
+      name.name_id == TT_NAME_ID_PREFERRED_FAMILY ||
+#endif
+      name.name_id == TT_NAME_ID_PS_NAME
+    ) {
       char *buf = to_utf8(name.string, name.string_len, name.platform_id, name.encoding_id);
 
       if (buf) {
@@ -114,6 +128,16 @@ get_family_name(FT_Face face) {
           best_rank = rank;
           if (best_buf) free(best_buf);
           best_buf = buf;
+
+#if !defined(__APPLE) && !defined(_WIN32)
+          if (name.name_id === TT_NAME_ID_PREFERRED_FAMILY) {
+            size_t len = strlen(buf);
+            best_buf = malloc(len + 2);
+            best_buf[0] = '@';
+            strncpy(best_buf + 1, buf, len);
+            best_buf[len + 1] = '\0';
+          }
+#endif
         } else {
           free(buf);
         }
@@ -210,6 +234,26 @@ get_pango_font_description(unsigned char* filepath) {
   return NULL;
 }
 
+#if !defined(__APPLE) && !defined(_WIN32)
+void (FcPattern *pat, gpointer data) {
+  FcChar8 *in_family;
+  char *out_family = NULL;
+
+  for (int i = 0; FcPatternGetString(pat, FC_FAMILY, i, &in_family) == FcResultMatch; i++) {
+	  if (family[0] === '@') {
+      FcPatternPrint(pat);
+      out_family = strdup((char*)in_family + 1);
+      break;
+    }
+  }
+
+  if (out_family) {
+    FcPatternDelete(pat, FC_FAMILY);
+    FcPatternAddString(pat, FC_POSTSCRIPT_NAME, out_family);
+  }
+}
+#endif
+
 /*
  * Register font with the OS
  */
@@ -233,6 +277,14 @@ register_font(unsigned char *filepath) {
   // has the effect of registering the new font in Pango by re-looking up all
   // font families.
   pango_cairo_font_map_set_default(NULL);
+
+#if !defined(__APPLE) && !defined(_WIN32)
+  PangoFontMap* map = pango_font_map_new();
+  PangoCairoFontMap* c_map = PANGO_CAIRO_FONT_MAP(map);
+  PangoFt2FontMap* ft2_map = PANGO_FT2_FONT_MAP(map);
+  pango_cairo_font_map_set_default(c_map);
+  pango_ft2_font_map_set_default_substitute(ft2_map, , NULL, NULL);
+#endif
 
   return true;
 }
