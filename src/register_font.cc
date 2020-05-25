@@ -3,6 +3,7 @@
 #include <pango/pangocairo.h>
 #include <pango/pango-fontmap.h>
 #include <pango/pango.h>
+#include <iconv.h>
 
 #ifdef __APPLE__
 #include <CoreText/CoreText.h>
@@ -57,7 +58,7 @@ to_utf8(FT_Byte* buf, FT_UInt len, FT_UShort pid, FT_UShort eid) {
   char const *fromcode;
 
   if (pid == TT_PLATFORM_MACINTOSH && eid == TT_MAC_ID_ROMAN) {
-    fromcode = "MAC";
+    fromcode = "Mac";
   } else if (pid == TT_PLATFORM_MICROSOFT && eid == TT_MS_ID_UNICODE_CS) {
     fromcode = "UTF-16BE";
   } else {
@@ -65,9 +66,9 @@ to_utf8(FT_Byte* buf, FT_UInt len, FT_UShort pid, FT_UShort eid) {
     return NULL;
   }
 
-  GIConv cd = g_iconv_open("UTF-8", fromcode);
+  iconv_t cd = iconv_open("UTF-8", fromcode);
 
-  if (cd == (GIConv)-1) {
+  if (cd == (iconv_t)-1) {
     free(ret);
     return NULL;
   }
@@ -75,7 +76,7 @@ to_utf8(FT_Byte* buf, FT_UInt len, FT_UShort pid, FT_UShort eid) {
   size_t inbytesleft = len;
   size_t outbytesleft = ret_len;
 
-  size_t n_converted = g_iconv(cd, (char**)&buf, &inbytesleft, &ret, &outbytesleft);
+  size_t n_converted = iconv(cd, (char**)&buf, &inbytesleft, &ret, &outbytesleft);
 
   ret -= ret_len - outbytesleft; // rewind the pointers to their
   buf -= len - inbytesleft;      // original starting positions
@@ -94,35 +95,12 @@ to_utf8(FT_Byte* buf, FT_UInt len, FT_UShort pid, FT_UShort eid) {
  * system, fall back to the other
  */
 
-typedef struct _NameDef {
-  const char *buf;
-  int rank; // the higher the more desirable
-} NameDef;
-
-gint
-_name_def_compare(gconstpointer a, gconstpointer b) {
-  return ((NameDef*)a)->rank > ((NameDef*)b)->rank ? -1 : 1;
-}
-
-// Some versions of GTK+ do not have this, particualrly the one we
-// currently link to in node-canvas's wiki
-void
-_free_g_list_item(gpointer data, gpointer user_data) {
-  NameDef *d = (NameDef *)data;
-  free((void *)(d->buf));
-}
-
-void
-_g_list_free_full(GList *list) {
-  g_list_foreach(list, _free_g_list_item, NULL);
-  g_list_free(list);
-}
-
 char *
 get_family_name(FT_Face face) {
   FT_SfntName name;
-  GList *list = NULL;
-  char *utf8name = NULL;
+
+  int best_rank = -1;
+  char* best_buf = NULL;
 
   for (unsigned i = 0; i < FT_Get_Sfnt_Name_Count(face); ++i) {
     FT_Get_Sfnt_Name(face, i, &name);
@@ -131,20 +109,19 @@ get_family_name(FT_Face face) {
       char *buf = to_utf8(name.string, name.string_len, name.platform_id, name.encoding_id);
 
       if (buf) {
-        NameDef *d = (NameDef*)malloc(sizeof(NameDef));
-        d->buf = (const char*)buf;
-        d->rank = GET_NAME_RANK(name);
-
-        list = g_list_insert_sorted(list, (gpointer)d, _name_def_compare);
+        int rank = GET_NAME_RANK(name);
+        if (rank > best_rank) {
+          best_rank = rank;
+          if (best_buf) free(best_buf);
+          best_buf = buf;
+        } else {
+          free(buf);
+        }
       }
     }
   }
 
-  GList *best_def = g_list_first(list);
-  if (best_def) utf8name = (char*) strdup(((NameDef*)best_def->data)->buf);
-  if (list) _g_list_free_full(list);
-
-  return utf8name;
+  return best_buf;
 }
 
 PangoWeight
