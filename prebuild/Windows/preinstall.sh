@@ -16,7 +16,8 @@ pacman --noconfirm -S \
   mingw64/mingw-w64-x86_64-freetype \
   mingw64/mingw-w64-x86_64-fontconfig \
   mingw64/mingw-w64-x86_64-librsvg \
-  mingw64/mingw-w64-x86_64-libxml2
+  mingw64/mingw-w64-x86_64-libxml2 \
+  mingw64/mingw-w64-x86_64-harfbuzz
 
 # create .lib files for vc++
 
